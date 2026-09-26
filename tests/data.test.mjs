@@ -6,6 +6,7 @@ import { buildIndex } from '../site/js/data/static-repository.js';
 import { exportStatus } from '../site/js/data/psrozklad.js';
 import { normalizeRozItem, mergeAcrossGroups } from '../site/js/domain/lessons.js';
 import { addExternal, buildCatalog, filterForUser, makeClassifier } from '../site/js/domain/electives.js';
+import { KNOWN_ISSUES, issuesFor } from '../site/js/known-issues.js';
 
 const data = JSON.parse(readFileSync(new URL('../site/data.json', import.meta.url), 'utf8'));
 
@@ -157,14 +158,24 @@ test('buildCatalog і addExternal', () => {
   const catalog = buildCatalog(lessons, makeClassifier());
   assert.deepEqual(catalog.languages.map((l) => l.title), ['Іноземна мова']);
   assert.equal(catalog.languages[0].teachers.length, 3);
-  const web = catalog.electives.find((e) => e.title === 'Основи web технологій');
-  assert.equal(web.likelyDvvs, true);
-  const server = catalog.electives.find((e) => e.title === 'Веб програмування на стороні сервера');
-  assert.equal(server.teachers.length, 2);
-  assert.equal(server.likelyDvvs, false);
+  // «Веб програмування…» є в розкладі ще й лекцією потоком — це звичайна дисципліна з двома викладачами, не ДВВС.
+  assert.deepEqual(catalog.sections.map((e) => e.title), ['Веб програмування на стороні сервера']);
+  assert.equal(catalog.sections[0].teachers.length, 2);
+  assert.deepEqual(catalog.electives.map((e) => e.title), ['Основи web технологій', 'Створення власного бізнесу']);
+  assert.ok(catalog.electives.every((e) => e.likelyDvvs));
 
   const [first] = lessons;
   const merged = addExternal([first], [first, { ...first, id: 'x', date: '2026-10-05' }]);
   assert.equal(merged.length, 2, 'дубль тієї самої пари не додається');
   assert.equal(merged[1].why, 'external');
+});
+
+test('відомі проблеми позначають відповідні пари', () => {
+  const idx = buildIndex(data);
+  const [group] = idx.groups.values();
+  const lessons = idx.groupLessons.get(group.id);
+  const flagged = lessons.filter((l) => issuesFor(l).length);
+  assert.equal(flagged.length, 2, 'обидва бронювання «Основ національного спротиву»');
+  assert.ok(flagged.every((l) => l.kind === 'reserved' && issuesFor(l)[0].id === 'ons-time'));
+  assert.equal(new Set(KNOWN_ISSUES.map((i) => i.id)).size, KNOWN_ISSUES.length, 'id унікальні');
 });

@@ -4,6 +4,7 @@
 //   #/teachers, #/teachers/<ключ>?date=…&view=…
 //   #/settings, #/settings/group, #/settings/external[/<ключ викладача>]
 //   #/setup, #/setup/options
+//   #/issues — відомі проблеми прототипу
 
 export function parseHash(hash = location.hash) {
   const raw = hash.replace(/^#\/?/, '');

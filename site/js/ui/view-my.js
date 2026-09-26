@@ -84,11 +84,13 @@ export async function renderMy(root, ctx) {
   if (!ctx.isCurrent()) return;
 
   const range = view === 'week' ? weekRange(date) : { from: date, to: date };
-  const [{ visible, hidden, missingExternal }, { catalog, subgroups }] = await Promise.all([
+  const [mine, { catalog, subgroups }] = await Promise.all([
     loadMine(ctx, group.id, range),
     loadCatalog(ctx, group.id),
   ]);
   if (!ctx.isCurrent()) return;
+  const { hidden, missingExternal } = mine;
+  const visible = markSections(mine.visible, catalog, prefs);
 
   const navigate = (patch) => {
     if (patch.view) ctx.setUi({ view: patch.view });
@@ -110,8 +112,9 @@ export async function renderMy(root, ctx) {
   if (prefs.subgroup == null && subgroups.length > 1) {
     notes.push(notice('info', 'Підгрупу не вибрано — показано пари всіх підгруп. ', h('a', { href: href('settings') }, 'Вибрати підгрупу')));
   }
-  if (visible.some((l) => l.why === 'language-any')) {
-    notes.push(notice('info', 'Іноземна: показано всіх викладачів. Позначте свого кнопкою «Мій викладач».'));
+  const unchosen = [...new Set(visible.filter((l) => l.why === 'language-any' || l.why === 'section-any').map((l) => l.title))];
+  if (unchosen.length) {
+    notes.push(notice('info', `${unchosen.join(', ')}: показано всіх викладачів. Позначте свого кнопкою «Мій викладач».`));
   }
   for (const e of missingExternal) {
     notes.push(notice('warn', `Сторонню дисципліну «${e.title}» не показано: розкладу викладача ${e.teacherName ?? ''} немає в даних.`));
@@ -146,6 +149,19 @@ export async function renderMy(root, ctx) {
   );
 }
 
+/**
+ * Пари «Збірна група» звичайних дисциплін з кількома викладачами (catalog.sections):
+ * 'section-any' — свого викладача ще не вибрано, 'section-mine' — вибрано (інших приховано).
+ */
+function markSections(lessons, catalog, prefs) {
+  const sections = new Map(catalog.sections.filter((e) => e.teachers.length > 1).map((e) => [e.titleKey, e]));
+  return lessons.map((l) => {
+    if (l.why !== 'mixed' || !sections.has(l.titleKey)) return l;
+    const chosen = prefs.hiddenElectives.some((e) => e.titleKey === l.titleKey && e.teacherKey && e.teacherKey !== l.teacher?.key);
+    return { ...l, why: chosen ? 'section-mine' : 'section-any' };
+  });
+}
+
 function subgroupLabel(subgroup) {
   return subgroup ? `підгрупа ${subgroup}` : 'усі підгрупи';
 }
@@ -164,8 +180,8 @@ function nextDayHint(ctx, groupId, date, visible) {
 }
 
 /**
- * Дії на картці «Збірна група»: «Не моя» (приховати), «Мій викладач» (іноземна),
- * «Показувати знову» (для прихованих). Кожну можна скасувати з тосту.
+ * Дії на картці «Збірна група»: «Мій викладач» (іноземна й дисципліни з кількома викладачами),
+ * «Не моя» (вибіркові), «Показувати знову» (приховані). Кожну можна скасувати з тосту.
  */
 function lessonActions(ctx, lesson, catalog) {
   const before = ctx.prefs;
@@ -177,6 +193,19 @@ function lessonActions(ctx, lesson, catalog) {
   const action = (label, onclick, primary = false) => h('div', { class: 'lesson-actions' },
     h('button', { class: ['btn btn-small', primary ? 'btn-primary' : 'btn-quiet'], type: 'button', onclick }, label));
 
+  // Звичайна дисципліна з кількома викладачами: «Мій викладач» ховає пари всіх інших.
+  const section = catalog.sections.find((e) => e.titleKey === lesson.titleKey);
+  if (section && section.teachers.length > 1 && lesson.teacher && (lesson.why === 'section-any' || lesson.why === 'hidden-by-user')) {
+    const others = section.teachers
+      .filter((t) => t.key !== lesson.teacher.key)
+      .map((t) => ({ titleKey: section.titleKey, title: section.title, teacherKey: t.key, teacherName: t.name }));
+    return action('Мій викладач', () => apply(
+      { hiddenElectives: [...before.hiddenElectives.filter((e) => e.titleKey !== section.titleKey), ...others] },
+      `${section.title}: лише ${lesson.teacher.short}`,
+      { hiddenElectives: before.hiddenElectives },
+    ), lesson.why === 'hidden-by-user');
+  }
+
   switch (lesson.why) {
     case 'language-any':
     case 'other-language-teacher':
@@ -187,7 +216,7 @@ function lessonActions(ctx, lesson, catalog) {
         { englishTeacher: before.englishTeacher },
       ), lesson.why === 'other-language-teacher');
     case 'mixed': {
-      // Якщо дисципліну ведуть кілька викладачів (різні секції), ховаємо лише цю секцію.
+      // Вибіркова (ДВВС). Якщо її ведуть кілька викладачів, ховаємо лише пари цього викладача.
       const entry = catalog.electives.find((e) => e.titleKey === lesson.titleKey);
       const byTeacher = Boolean(entry && entry.teachers.length > 1 && lesson.teacher);
       const hide = {

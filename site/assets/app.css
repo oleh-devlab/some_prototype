@@ -392,7 +392,7 @@ body.is-setup { padding-bottom: env(safe-area-inset-bottom); }
 }
 .badge-type { background: var(--tone-soft); color: var(--tone); border-color: transparent; }
 .badge-aud.aud-subgroup { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
-.badge-aud.aud-external, .badge-aud.aud-language { background: var(--c-reserved-soft); color: var(--c-reserved); border-color: transparent; }
+.badge-aud.aud-external, .badge-aud.aud-language, .badge-aud.aud-section-mine { background: var(--c-reserved-soft); color: var(--c-reserved); border-color: transparent; }
 .badge-foreign { border-style: dashed; }
 .badge-alert { background: var(--c-control-soft); color: var(--danger); border-color: transparent; }
 .badge-online { background: var(--c-lecture-soft); color: var(--c-lecture); border-color: transparent; }
@@ -412,6 +412,16 @@ body.is-setup { padding-bottom: env(safe-area-inset-bottom); }
 .meta-text { display: inline-block; padding: 3px 0; }
 .note { margin-top: 6px; font-size: 0.88rem; padding: 6px 10px; border-radius: 10px; background: var(--surface-2); }
 .note-alert { background: var(--c-control-soft); }
+.known-issue { margin-top: 8px; font-size: 0.86rem; border-radius: 10px; background: var(--warn-soft); padding: 6px 10px; }
+.known-issue summary { cursor: pointer; font-weight: 700; color: var(--warn); display: flex; align-items: center; gap: 6px; min-height: 28px; list-style: none; }
+.known-issue summary::-webkit-details-marker { display: none; }
+.known-issue summary::after { content: '▾'; margin-left: auto; }
+.known-issue[open] summary::after { content: '▴'; }
+.known-issue p { margin: 4px 0 6px; color: var(--text); }
+.badge-issue { background: var(--warn-soft); color: var(--warn); border-color: transparent; gap: 4px; }
+.badge-kind { gap: 4px; margin-bottom: 8px; background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.issues-intro { margin: 4px 0 14px; }
+.card > p { line-height: 1.5; }
 .lesson-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 6px; min-height: 24px; }
 .lesson-status { flex: 1 1 auto; display: flex; align-items: center; gap: 8px; font-size: 0.82rem; font-weight: 700; color: var(--now); white-space: nowrap; }
 .progress { flex: 1; height: 4px; border-radius: 4px; background: var(--now-soft); overflow: hidden; }
@@ -543,6 +553,8 @@ body.is-setup { padding-bottom: env(safe-area-inset-bottom); }
 .choice.is-checked { border-color: var(--accent); background: var(--accent-soft); }
 .choice input { width: 20px; height: 20px; margin: 2px 0 0; flex: none; accent-color: var(--accent); }
 .choice-text { min-width: 0; }
+.choice-block { padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; }
+.choice-block .chips { padding-left: 0; }
 .chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 4px 2px 44px; }
 .chip {
   min-height: 34px;

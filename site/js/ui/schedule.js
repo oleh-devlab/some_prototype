@@ -6,6 +6,7 @@ import {
 } from '../lib/dates.js';
 import { plural } from '../lib/text.js';
 import { groupByDate, groupBySlot } from '../domain/lessons.js';
+import { KNOWN_ISSUES, issuesFor } from '../known-issues.js';
 import { h, icon } from './dom.js';
 import { href } from './router.js';
 
@@ -89,6 +90,7 @@ export function lessonTiming(lesson) {
 
 const AUDIENCE_TAG = {
   language: 'Ваш викладач',
+  'section-mine': 'Ваш викладач',
   external: 'Стороння вибіркова',
 };
 
@@ -114,6 +116,10 @@ export function lessonCard(lesson, { mode = 'my', compact = false, timing = null
   if (foreign) badges.push(h('span', { class: 'badge badge-foreign' }, 'приховано'));
   if (lesson.replacement) badges.push(h('span', { class: 'badge badge-alert' }, 'Заміна'));
   if (lesson.online || lesson.link) badges.push(h('span', { class: 'badge badge-online' }, 'Онлайн'));
+  const issues = issuesFor(lesson);
+  if (issues.length && compact) {
+    badges.push(h('span', { class: 'badge badge-issue', title: issues.map((i) => i.title).join('; ') }, icon('warn'), 'відома проблема'));
+  }
   const metaItems = [];
   if (mode !== 'room' && lesson.room) {
     metaItems.push(h('a', { class: 'meta-link', href: href('rooms', [lesson.room.key], { date: lesson.date }) }, icon('pin'), lesson.room.label));
@@ -144,6 +150,13 @@ export function lessonCard(lesson, { mode = 'my', compact = false, timing = null
     if (lesson.comment) extras.push(h('p', { class: 'note' }, lesson.comment));
     if (lesson.half) extras.push(h('p', { class: 'note' }, h('strong', null, 'Частина: '), lesson.half));
     if (lesson.kind === 'untitled') extras.push(h('p', { class: 'note' }, 'Зайнятий слот без назви. На деяких факультетах так позначають місце під ДВВС.'));
+    // Позначка для команди: відома проблема даних чи евристики, що стосується цієї пари.
+    for (const issue of issues) {
+      extras.push(h('details', { class: 'known-issue' },
+        h('summary', null, icon('warn'), `Відома проблема: ${issue.short ?? issue.title}`),
+        h('p', null, issue.text),
+        h('a', { href: href('issues') }, 'Усі відомі проблеми прототипу')));
+    }
   }
 
   return h('article', {
@@ -308,5 +321,8 @@ export function dataFooter(meta) {
   }
   if (meta.range) parts.push(`знімок ${formatDateShort(meta.range.from)} – ${formatDateShort(meta.range.to)}`);
   if (meta.coverage && !meta.coverage.complete) parts.push('дані неповні');
-  return parts.length ? h('p', { class: 'data-footer' }, parts.join(' · ')) : null;
+  return h('p', { class: 'data-footer' },
+    parts.join(' · '),
+    parts.length ? h('br') : null,
+    h('a', { href: href('issues') }, `Відомі проблеми прототипу (${KNOWN_ISSUES.length})`));
 }

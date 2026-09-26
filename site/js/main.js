@@ -10,6 +10,7 @@ import { go, href, parseHash } from './ui/router.js';
 import { renderMy } from './ui/view-my.js';
 import { renderLookup } from './ui/view-lookup.js';
 import { renderExternal, renderGroupPicker, renderSettings } from './ui/view-settings.js';
+import { renderIssues } from './ui/view-issues.js';
 
 setNowOverride(new URLSearchParams(location.search).get('now'));
 
@@ -124,6 +125,9 @@ async function render() {
         if (route.params[0] === 'group') await renderGroupPicker(fresh, ctx);
         else if (route.params[0] === 'external') await renderExternal(fresh, ctx);
         else await renderSettings(fresh, ctx);
+        break;
+      case 'issues':
+        renderIssues(fresh, ctx);
         break;
       case 'setup':
         if (route.params[0] === 'options') await renderSettings(fresh, ctx, { setup: true });

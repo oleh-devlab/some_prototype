@@ -84,14 +84,23 @@ export function listSubgroups(lessons) {
 }
 
 /**
- * Каталог записів «Збірна група» з розкладу групи для екрана налаштувань:
- * іноземні мови (вибір викладача) та інші вибіркові (ДВВС тощо).
+ * Каталог записів «Збірна група» з розкладу групи:
+ *  languages — іноземні мови (вибір свого викладача);
+ *  sections  — звичайні дисципліни групи, частину пар яких ведуть кілька викладачів паралельно
+ *              (дисципліна є в розкладі ще й як потік / уся група / підгрупа — напр. лекція потоком,
+ *              а лабораторні «Збірною групою» у різних викладачів);
+ *  electives — трапляються лише як «Збірна група»: ймовірно, вибіркові (ДВВС).
+ * Це евристика: передавайте розклад групи за весь період, а не за день.
  */
 export function buildCatalog(lessons, classify) {
+  const regular = new Set(lessons
+    .filter((l) => l.kind === 'lesson' && l.audience.kind !== 'mixed')
+    .map((l) => l.titleKey));
   const byTitle = new Map();
   for (const l of lessons) {
-    const category = classify(l);
+    let category = classify(l);
     if (!category) continue;
+    if (category === 'elective' && regular.has(l.titleKey)) category = 'sections';
     let entry = byTitle.get(l.titleKey);
     if (!entry) {
       entry = { titleKey: l.titleKey, title: l.title, category, types: new Set(), teachers: new Map(), slots: new Map(), count: 0 };
@@ -123,6 +132,7 @@ export function buildCatalog(lessons, classify) {
   entries.sort((a, b) => a.title.localeCompare(b.title, 'uk'));
   return {
     languages: entries.filter((e) => e.category === 'language'),
+    sections: entries.filter((e) => e.category === 'sections'),
     electives: entries.filter((e) => e.category === 'elective'),
   };
 }
