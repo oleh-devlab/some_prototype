@@ -1,4 +1,4 @@
-// Вибір користувача в localStorage: група, підгрупа, вибіркові, викладач англійської.
+// Вибір користувача в localStorage: група, підгрупа, приховані й сторонні вибіркові, викладач англійської.
 // Без localStorage (приватний режим, заблоковані дані) сайт працює, але вибір не збережеться.
 
 const PREFS_KEY = 'lnu-rozklad:prefs:v1';
@@ -7,11 +7,12 @@ const RECENT_MAX = 6;
 
 export function defaultPrefs() {
   return {
-    version: 1,
-    group: null, //          { id, name }
-    subgroup: null, //       1 | 2 | … | null (не фільтрувати)
-    electives: [], //        [{ titleKey, title, teacherKey|null, teacherName|null, external }]
-    englishTeacher: null, // { key, name }
+    version: 2,
+    group: null, //             { id, name }
+    subgroup: null, //          1 | 2 | … | null (не фільтрувати)
+    englishTeacher: null, //    { key, name } | null — показувати всіх викладачів іноземної
+    hiddenElectives: [], //     «не моє» з «Збірної групи»: [{ titleKey, title, teacherKey|null, teacherName|null }]
+    externalElectives: [], //   сторонні дисципліни з розкладу викладача: [{ titleKey, title, teacherKey, teacherName }]
   };
 }
 
@@ -50,6 +51,14 @@ function writeJson(key, value) {
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
 const str = (v) => (typeof v === 'string' ? v : null);
 
+const entry = (e) => ({
+  titleKey: e.titleKey,
+  title: str(e.title) ?? e.titleKey,
+  teacherKey: str(e.teacherKey),
+  teacherName: str(e.teacherName),
+});
+const entries = (list) => (Array.isArray(list) ? list.filter((e) => isObj(e) && str(e.titleKey)).map(entry) : []);
+
 /** Перевіряє збережене значення поле за полем: зіпсований запис не ламає сайт. */
 function sanitize(raw) {
   const p = defaultPrefs();
@@ -58,19 +67,15 @@ function sanitize(raw) {
     p.group = { id: str(raw.group.id), name: str(raw.group.name) ?? '' };
   }
   if (Number.isInteger(raw.subgroup) && raw.subgroup > 0) p.subgroup = raw.subgroup;
-  if (Array.isArray(raw.electives)) {
-    p.electives = raw.electives
-      .filter((e) => isObj(e) && str(e.titleKey))
-      .map((e) => ({
-        titleKey: e.titleKey,
-        title: str(e.title) ?? e.titleKey,
-        teacherKey: str(e.teacherKey),
-        teacherName: str(e.teacherName),
-        external: Boolean(e.external),
-      }));
-  }
   if (isObj(raw.englishTeacher) && str(raw.englishTeacher.key)) {
     p.englishTeacher = { key: raw.englishTeacher.key, name: str(raw.englishTeacher.name) ?? raw.englishTeacher.key };
+  }
+  p.hiddenElectives = entries(raw.hiddenElectives);
+  p.externalElectives = entries(raw.externalElectives).filter((e) => e.teacherKey);
+  // v1 зберігав «лише мої» вибіркові (electives). Тепер усе показується за замовчуванням,
+  // тож переносимо тільки сторонні дисципліни, решта списку втрачає сенс.
+  if (Array.isArray(raw.electives)) {
+    p.externalElectives.push(...entries(raw.electives.filter((e) => isObj(e) && e.external)).filter((e) => e.teacherKey));
   }
   return p;
 }
@@ -111,7 +116,7 @@ export function saveUi(ui) {
   writeJson(UI_KEY, ui);
 }
 
-/** Рівність елективів: та сама дисципліна й той самий (або будь-який) викладач. */
-export function sameElective(a, b) {
-  return a.titleKey === b.titleKey && (a.teacherKey ?? null) === (b.teacherKey ?? null) && Boolean(a.external) === Boolean(b.external);
+/** Той самий запис: та сама дисципліна й той самий (або будь-який) викладач. */
+export function sameEntry(a, b) {
+  return a.titleKey === b.titleKey && (a.teacherKey ?? null) === (b.teacherKey ?? null);
 }

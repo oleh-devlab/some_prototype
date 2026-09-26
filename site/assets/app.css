@@ -148,11 +148,13 @@ body.is-setup { padding-bottom: env(safe-area-inset-bottom); }
   left: 50%;
   bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 12px);
   transform: translate(-50%, 20px);
-  max-width: calc(100% - 32px);
+  width: max-content;
+  max-width: min(420px, calc(100% - 32px));
   background: var(--text);
   color: var(--bg);
   padding: 10px 16px;
-  border-radius: 999px;
+  border-radius: 12px;
+  box-shadow: 0 6px 24px rgb(15 23 42 / 25%);
   font-size: 0.9rem;
   opacity: 0;
   pointer-events: none;
@@ -160,6 +162,18 @@ body.is-setup { padding-bottom: env(safe-area-inset-bottom); }
   z-index: 40;
 }
 .toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
+.toast.has-action { pointer-events: auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-right: 8px; }
+.toast-action {
+  border: 0;
+  background: none;
+  color: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  min-height: 40px;
+  padding: 0 8px;
+  flex: none;
+  cursor: pointer;
+}
 
 /* ---------- Кнопки ---------- */
 
@@ -182,6 +196,8 @@ body.is-setup { padding-bottom: env(safe-area-inset-bottom); }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 .btn-danger { color: var(--danger); }
 .btn-block { width: 100%; }
+.btn-quiet { background: transparent; border-color: transparent; color: var(--muted); font-weight: 600; }
+.btn-quiet:hover, .btn-quiet:focus-visible { color: var(--text); border-color: var(--border); }
 .btn-online { margin-top: 8px; color: var(--accent); }
 .link-btn { background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline; cursor: pointer; }
 
@@ -348,7 +364,7 @@ body.is-setup { padding-bottom: env(safe-area-inset-bottom); }
 }
 .badge-type { background: var(--tone-soft); color: var(--tone); border-color: transparent; }
 .badge-aud.aud-subgroup { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
-.badge-aud.aud-elective, .badge-aud.aud-external, .badge-aud.aud-language { background: var(--c-reserved-soft); color: var(--c-reserved); border-color: transparent; }
+.badge-aud.aud-external, .badge-aud.aud-language { background: var(--c-reserved-soft); color: var(--c-reserved); border-color: transparent; }
 .badge-foreign { border-style: dashed; }
 .badge-alert { background: var(--c-control-soft); color: var(--danger); border-color: transparent; }
 .badge-online { background: var(--c-lecture-soft); color: var(--c-lecture); border-color: transparent; }
@@ -372,7 +388,8 @@ body.is-setup { padding-bottom: env(safe-area-inset-bottom); }
 .note-alert { background: var(--c-control-soft); }
 .progress { margin-top: 8px; height: 4px; border-radius: 4px; background: var(--now-soft); overflow: hidden; }
 .progress span { display: block; height: 100%; background: var(--now); }
-.lesson-actions { margin-top: 8px; display: flex; gap: 8px; }
+.lesson-actions { margin-top: 6px; display: flex; gap: 8px; justify-content: flex-end; }
+.lesson-actions .btn-quiet { margin-right: -8px; margin-bottom: -4px; }
 
 /* Компактна картка (тиждень) */
 .lesson.is-compact { display: flex; gap: 10px; padding: 8px 10px; box-shadow: none; }

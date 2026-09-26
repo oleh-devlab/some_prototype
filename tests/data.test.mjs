@@ -112,34 +112,39 @@ test('buildIndex: пакет зі списком груп і кодами пом
   assert.equal(demkiv[0].teacher.name, 'Демків Лідія Степанівна');
 });
 
-test('filterForUser: підгрупа, англійська, вибіркові', () => {
+test('filterForUser: «Збірна група» показується вся, доки її не приховано', () => {
   const idx = buildIndex(data);
   const [group] = idx.groups.values();
   const lessons = idx.groupLessons.get(group.id);
   const classify = makeClassifier();
-  const base = { subgroup: 1, electives: [], englishTeacher: null };
+  const base = { subgroup: 1, englishTeacher: null, hiddenElectives: [], externalElectives: [] };
+  const mixedOf = (res) => res.visible.filter((l) => l.audience.kind === 'mixed');
 
   const plain = filterForUser(lessons, base, classify);
-  assert.ok(plain.visible.every((l) => l.audience.kind !== 'mixed'), '«Збірна група» прихована за замовчуванням');
+  assert.equal(mixedOf(plain).length, 10, 'за замовчуванням видно всі 10 записів «Збірна група»');
+  assert.equal(plain.hidden.length, 0);
   assert.ok(plain.visible.every((l) => l.audience.kind !== 'subgroup' || l.audience.subgroups.includes(1)));
-  assert.equal(plain.hidden.length, 10);
   assert.ok(plain.visible.some((l) => l.kind === 'reserved'), 'бронювання показуються');
+  assert.ok(mixedOf(plain).filter((l) => l.title === 'Іноземна мова').every((l) => l.why === 'language-any'));
 
-  const withChoice = filterForUser(lessons, {
+  const chosen = filterForUser(lessons, {
     ...base,
     englishTeacher: { key: 'довбенко лариса василівна', name: '' },
-    electives: [
-      { titleKey: 'основи wеb технологій', teacherKey: null },
-      { titleKey: 'веб програмування на стороні сервера', teacherKey: 'гусак олег васильович' },
+    hiddenElectives: [
+      { titleKey: 'створення власного бізнесу', teacherKey: null },
+      { titleKey: 'веб програмування на стороні сервера', teacherKey: 'чмихало олександр сергійович' },
     ],
   }, classify);
-  const mixed = withChoice.visible.filter((l) => l.audience.kind === 'mixed');
-  assert.equal(mixed.filter((l) => l.title === 'Іноземна мова').length, 2);
-  assert.ok(mixed.every((l) => l.title !== 'Іноземна мова' || l.teacher.key === 'довбенко лариса василівна'));
-  assert.equal(mixed.filter((l) => l.titleKey === 'основи wеb технологій').length, 1);
-  const web = mixed.filter((l) => l.titleKey === 'веб програмування на стороні сервера');
-  assert.equal(web.length, 1);
-  assert.equal(web[0].teacher.short, 'Гусак О. В.');
+  const english = mixedOf(chosen).filter((l) => l.title === 'Іноземна мова');
+  assert.equal(english.length, 2);
+  assert.ok(english.every((l) => l.teacher.key === 'довбенко лариса василівна' && l.why === 'language'));
+  assert.ok(!mixedOf(chosen).some((l) => l.titleKey === 'створення власного бізнесу'));
+  const web = mixedOf(chosen).filter((l) => l.titleKey === 'веб програмування на стороні сервера');
+  assert.deepEqual(web.map((l) => l.teacher.short), ['Гусак О. В.'], 'прихована лише секція Чмихала');
+  assert.equal(mixedOf(chosen).filter((l) => l.titleKey === 'основи wеb технологій').length, 1);
+  // Приховане: 4 пари інших викладачів іноземної + «Створення бізнесу» + секція Чмихала.
+  assert.equal(chosen.hidden.length, 6);
+  assert.deepEqual([...new Set(chosen.hidden.map((l) => l.why))].sort(), ['hidden-by-user', 'other-language-teacher']);
 
   const allSubgroups = filterForUser(lessons, { ...base, subgroup: null }, classify);
   assert.equal(allSubgroups.visible.filter((l) => l.audience.kind === 'subgroup').length, 6);

@@ -86,7 +86,6 @@ export function lessonTiming(lesson) {
 
 const AUDIENCE_TAG = {
   language: 'Ваш викладач',
-  elective: 'Моя вибіркова',
   external: 'Стороння вибіркова',
 };
 
@@ -109,7 +108,7 @@ export function lessonCard(lesson, { mode = 'my', compact = false, timing = null
     const tag = AUDIENCE_TAG[lesson.why] ?? (lesson.audience.kind === 'whole' ? null : lesson.audience.label);
     if (tag) badges.push(h('span', { class: `badge badge-aud aud-${lesson.why || lesson.audience.kind}` }, tag));
   }
-  if (foreign) badges.push(h('span', { class: 'badge badge-foreign' }, 'не у вашому виборі'));
+  if (foreign) badges.push(h('span', { class: 'badge badge-foreign' }, 'приховано'));
   if (lesson.replacement) badges.push(h('span', { class: 'badge badge-alert' }, 'Заміна'));
   if (lesson.online || lesson.link) badges.push(h('span', { class: 'badge badge-online' }, 'Онлайн'));
   // Для чужих (прихованих) пар час «зараз/далі» не показуємо — лише шум.

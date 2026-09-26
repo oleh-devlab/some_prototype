@@ -48,11 +48,15 @@ function setTitle(title, subtitle = null, link = null) {
 }
 
 let toastTimer = null;
-function toast(message) {
-  $toast.textContent = message;
+/** Коротке повідомлення; action = { label, run } додає кнопку (наприклад, «Скасувати»). */
+function toast(message, action = null) {
+  const hide = () => $toast.classList.remove('is-visible', 'has-action');
+  replaceChildren($toast, h('span', null, message),
+    action ? h('button', { class: 'toast-action', type: 'button', onclick: () => { hide(); action.run(); } }, action.label) : null);
   $toast.classList.add('is-visible');
+  $toast.classList.toggle('has-action', Boolean(action));
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => $toast.classList.remove('is-visible'), 2600);
+  toastTimer = setTimeout(hide, action ? 5000 : 2600);
 }
 
 function makeContext(route, token) {

@@ -1,9 +1,8 @@
-// Режим «Мій розклад»: група + підгрупа + мої вибіркові.
+// Режим «Мій розклад»: група + підгрупа; «Збірна група» — усе, крім позначеного як «не моє».
 
 import { addDays, formatDayLong, isIsoDate, toUaDate, todayIso } from '../lib/dates.js';
 import { plural } from '../lib/text.js';
-import { addExternal, buildCatalog, filterForUser, listSubgroups } from '../domain/electives.js';
-import { sameElective } from '../prefs.js';
+import { addExternal, buildCatalog, filterForUser, listSubgroups, matchesElective } from '../domain/electives.js';
 import { append, h, icon } from './dom.js';
 import { href } from './router.js';
 import {
@@ -16,7 +15,7 @@ async function loadMine(ctx, groupId, range) {
   const { lessons } = await repo.getGroupSchedule(groupId, range);
   const { visible, hidden } = filterForUser(lessons, prefs, classify);
 
-  const externals = prefs.electives.filter((e) => e.external && e.teacherKey);
+  const externals = prefs.externalElectives;
   const missingExternal = [];
   const externalLessons = [];
   await Promise.all(externals.map(async (e) => {
@@ -110,8 +109,8 @@ export async function renderMy(root, ctx) {
   if (prefs.subgroup == null && subgroups.length > 1) {
     notes.push(notice('info', 'Підгрупу не вибрано — показано пари всіх підгруп. ', h('a', { href: href('settings') }, 'Вибрати підгрупу')));
   }
-  if (catalog.languages.length && !prefs.englishTeacher) {
-    notes.push(notice('info', 'Іноземна мова прихована, доки ви не виберете свого викладача. ', h('a', { href: href('settings') }, 'Вибрати викладача')));
+  if (visible.some((l) => l.why === 'language-any')) {
+    notes.push(notice('info', 'Іноземну показано для всіх викладачів. Натисніть «Мій викладач» на своїй парі — інші зникнуть.'));
   }
   for (const e of missingExternal) {
     notes.push(notice('warn', `Сторонню дисципліну «${e.title}» не показано: розкладу викладача ${e.teacherName ?? ''} немає в даних.`));
@@ -121,14 +120,14 @@ export async function renderMy(root, ctx) {
   if (hidden.length) {
     const where = view === 'week' ? 'цього тижня' : 'цього дня';
     notes.push(h('div', { class: 'hidden-bar' },
-      h('span', null, `${showHidden ? 'Показано' : 'Приховано'} ${hidden.length} ${plural(hidden.length, ['пару', 'пари', 'пар'])} «Збірна група» ${where}, яких немає у вашому виборі.`),
+      h('span', null, `${showHidden ? 'Показано' : 'Приховано'} ${hidden.length} ${plural(hidden.length, ['пару', 'пари', 'пар'])} «Збірна група» ${where}, які не ваші.`),
       h('button', { class: 'btn btn-small', type: 'button', onclick: () => { ctx.session.showHidden = !showHidden; ctx.rerender(); } }, showHidden ? 'Сховати' : 'Показати'),
     ));
   }
 
   const hiddenIds = new Set(showHidden ? hidden.map((l) => l.id) : []);
   const shown = showHidden ? [...visible, ...hidden] : visible;
-  const actionsFor = (lesson) => (hiddenIds.has(lesson.id) ? mineButton(ctx, lesson, catalog) : null);
+  const actionsFor = (lesson) => lessonActions(ctx, lesson, catalog);
 
   const body = view === 'week'
     ? weekBlock(date, shown, { mode: 'my', meta: ctx.meta, hiddenIds, dayHref: (d) => href('my', [], { date: d, view: 'day' }) })
@@ -163,34 +162,52 @@ function nextDayHint(ctx, groupId, date, visible) {
   return holder;
 }
 
-/** Кнопка «Це моя пара» для прихованого запису «Збірна група». */
-function mineButton(ctx, lesson, catalog) {
-  return h('div', { class: 'lesson-actions' },
-    h('button', {
-      class: 'btn btn-small btn-primary',
-      type: 'button',
-      onclick: () => {
-        if (ctx.classify(lesson) === 'language') {
-          if (!lesson.teacher) return;
-          ctx.setPrefs({ englishTeacher: { key: lesson.teacher.key, name: lesson.teacher.name } });
-          ctx.toast(`Викладач іноземної: ${lesson.teacher.short}`);
-        } else {
-          const entry = catalog.electives.find((e) => e.titleKey === lesson.titleKey);
-          const byTeacher = entry && entry.teachers.length > 1 && lesson.teacher;
-          const elective = {
-            titleKey: lesson.titleKey,
-            title: lesson.title,
-            teacherKey: byTeacher ? lesson.teacher.key : null,
-            teacherName: byTeacher ? lesson.teacher.name : null,
-            external: false,
-          };
-          if (!ctx.prefs.electives.some((e) => sameElective(e, elective))) {
-            ctx.setPrefs({ electives: [...ctx.prefs.electives, elective] });
-          }
-          ctx.toast(byTeacher ? `Додано: ${lesson.title} (${lesson.teacher.short})` : `Додано: ${lesson.title}`);
-        }
-        ctx.rerender();
-      },
-    }, icon('check'), 'Це моя пара'),
-  );
+/**
+ * Дії на картці «Збірна група»: «Не моя» (приховати), «Мій викладач» (іноземна),
+ * «Показувати знову» (для прихованих). Кожну можна скасувати з тосту.
+ */
+function lessonActions(ctx, lesson, catalog) {
+  const before = ctx.prefs;
+  const apply = (patch, message, undo) => {
+    ctx.setPrefs(patch);
+    ctx.toast(message, { label: 'Скасувати', run: () => { ctx.setPrefs(undo); ctx.rerender(); } });
+    ctx.rerender();
+  };
+  const action = (label, onclick, primary = false) => h('div', { class: 'lesson-actions' },
+    h('button', { class: ['btn btn-small', primary ? 'btn-primary' : 'btn-quiet'], type: 'button', onclick }, label));
+
+  switch (lesson.why) {
+    case 'language-any':
+    case 'other-language-teacher':
+      if (!lesson.teacher) return null;
+      return action('Мій викладач', () => apply(
+        { englishTeacher: { key: lesson.teacher.key, name: lesson.teacher.name } },
+        `Іноземна: лише ${lesson.teacher.short}`,
+        { englishTeacher: before.englishTeacher },
+      ), lesson.why === 'other-language-teacher');
+    case 'mixed': {
+      // Якщо дисципліну ведуть кілька викладачів (різні секції), ховаємо лише цю секцію.
+      const entry = catalog.electives.find((e) => e.titleKey === lesson.titleKey);
+      const byTeacher = Boolean(entry && entry.teachers.length > 1 && lesson.teacher);
+      const hide = {
+        titleKey: lesson.titleKey,
+        title: lesson.title,
+        teacherKey: byTeacher ? lesson.teacher.key : null,
+        teacherName: byTeacher ? lesson.teacher.name : null,
+      };
+      return action('Не моя', () => apply(
+        { hiddenElectives: [...before.hiddenElectives, hide] },
+        `Приховано: ${lesson.title}${byTeacher ? ` (${lesson.teacher.short})` : ''}`,
+        { hiddenElectives: before.hiddenElectives },
+      ));
+    }
+    case 'hidden-by-user':
+      return action('Показувати знову', () => apply(
+        { hiddenElectives: before.hiddenElectives.filter((e) => !matchesElective(lesson, [e])) },
+        `Знову показується: ${lesson.title}`,
+        { hiddenElectives: before.hiddenElectives },
+      ), true);
+    default:
+      return null;
+  }
 }

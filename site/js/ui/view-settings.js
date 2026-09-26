@@ -4,7 +4,7 @@ import { formatDateShort, weekdayShortByIndex } from '../lib/dates.js';
 import { matchesQuery, plural, searchKey } from '../lib/text.js';
 import { describeGroupCode } from '../domain/parse.js';
 import { buildCatalog, listSubgroups, teacherDisciplines } from '../domain/electives.js';
-import { clearPrefs, sameElective, storageAvailable } from '../prefs.js';
+import { clearPrefs, sameEntry, storageAvailable } from '../prefs.js';
 import { append, h, icon, replaceChildren } from './dom.js';
 import { href } from './router.js';
 import { coverageNotice, notice } from './schedule.js';
@@ -178,14 +178,14 @@ function languageSection(ctx, languages) {
   const list = [...teachers.values()];
   const knownCurrent = !current || teachers.has(current.key);
   return section('Іноземна мова',
-    `${titles.length ? `${titles.join(', ')}. ` : ''}Кілька викладачів ведуть пари паралельно. Виберіть свого — пари інших буде приховано.`,
+    `${titles.length ? `${titles.join(', ')}. ` : ''}Кілька викладачів ведуть пари паралельно. Доки свого не вибрано, показуються всі; виберіть — і пари інших буде приховано.`,
     h('ul', { class: 'choice-list', role: 'radiogroup' },
       list.map((t) => choiceRow({
         type: 'radio', name: 'lang', checked: current?.key === t.key, onChange: () => choose(t),
         title: t.name, detail: `${slotsText(t.slots)} пара · ${t.rooms.join(', ')}`,
       })),
       !knownCurrent ? choiceRow({ type: 'radio', name: 'lang', checked: true, onChange: () => {}, title: current.name, detail: 'немає в розкладі цієї групи' }) : null,
-      choiceRow({ type: 'radio', name: 'lang', checked: !current, onChange: () => choose(null), title: 'Не вибрано', detail: 'іноземну не показувати' }),
+      choiceRow({ type: 'radio', name: 'lang', checked: !current, onChange: () => choose(null), title: 'Усі викладачі', detail: 'показувати пари всіх груп' }),
     ),
   );
 }
@@ -205,32 +205,35 @@ function choiceRow({ type, name, checked, onChange, title, detail, extra }) {
 
 function electivesSection(ctx, electives) {
   const { prefs } = ctx;
-  const selectedFor = (titleKey) => prefs.electives.filter((e) => !e.external && e.titleKey === titleKey);
-  const setFor = (titleKey, entries) => {
-    ctx.setPrefs({ electives: [...prefs.electives.filter((e) => e.external || e.titleKey !== titleKey), ...entries] });
+  const hiddenFor = (titleKey) => prefs.hiddenElectives.filter((e) => e.titleKey === titleKey);
+  const setFor = (titleKey, list) => {
+    ctx.setPrefs({ hiddenElectives: [...prefs.hiddenElectives.filter((e) => e.titleKey !== titleKey), ...list] });
     ctx.rerender();
   };
 
   const rows = electives.map((entry) => {
-    const selected = selectedFor(entry.titleKey);
-    const checked = selected.length > 0;
-    const anyTeacher = selected.some((e) => !e.teacherKey);
-    const base = { titleKey: entry.titleKey, title: entry.title, external: false };
-    const toggle = () => setFor(entry.titleKey, checked ? [] : [{ ...base, teacherKey: null, teacherName: null }]);
+    const hidden = hiddenFor(entry.titleKey);
+    const base = { titleKey: entry.titleKey, title: entry.title };
+    const whole = { ...base, teacherKey: null, teacherName: null };
+    const hiddenTeachers = new Set(hidden.map((e) => e.teacherKey).filter(Boolean));
+    const shown = !hidden.some((e) => !e.teacherKey)
+      && !(entry.teachers.length && entry.teachers.every((t) => hiddenTeachers.has(t.key)));
+    const toggle = () => setFor(entry.titleKey, shown ? [whole] : []);
 
     let teacherChips = null;
-    if (checked && entry.teachers.length > 1) {
+    if (shown && entry.teachers.length > 1) {
       const toggleTeacher = (t) => {
-        const current = anyTeacher ? [] : selected.filter((e) => e.teacherKey);
-        const has = current.some((e) => e.teacherKey === t.key);
-        const next = has ? current.filter((e) => e.teacherKey !== t.key) : [...current, { ...base, teacherKey: t.key, teacherName: t.name }];
-        setFor(entry.titleKey, next.length ? next : [{ ...base, teacherKey: null, teacherName: null }]);
+        const next = hiddenTeachers.has(t.key)
+          ? hidden.filter((e) => e.teacherKey !== t.key)
+          : [...hidden, { ...base, teacherKey: t.key, teacherName: t.name }];
+        // Приховано всіх викладачів — це те саме, що приховати дисципліну.
+        const allHidden = entry.teachers.every((x) => next.some((e) => e.teacherKey === x.key));
+        setFor(entry.titleKey, allHidden ? [whole] : next);
       };
       teacherChips = h('div', { class: 'chips', role: 'group', 'aria-label': 'Викладачі' },
-        h('span', { class: 'muted small' }, 'Мої викладачі:'),
-        h('button', { type: 'button', class: ['chip', anyTeacher && 'is-active'], 'aria-pressed': String(anyTeacher), onclick: () => setFor(entry.titleKey, [{ ...base, teacherKey: null, teacherName: null }]) }, 'усі'),
+        h('span', { class: 'muted small' }, 'Показувати пари викладачів:'),
         entry.teachers.map((t) => {
-          const on = !anyTeacher && selected.some((e) => e.teacherKey === t.key);
+          const on = !hiddenTeachers.has(t.key);
           return h('button', { type: 'button', class: ['chip', on && 'is-active'], 'aria-pressed': String(on), title: `${slotsText(t.slots)} пара · ${t.rooms.join(', ')}`, onclick: () => toggleTeacher(t) },
             `${t.short} · ${slotsText(t.slots)}`);
         }),
@@ -240,26 +243,27 @@ function electivesSection(ctx, electives) {
       entry.types.join(', '),
       `${slotsText(entry.slots)} пара`,
       entry.teachers.length === 1 ? entry.teachers[0].short : `${entry.teachers.length} викл.`,
+      shown ? null : 'приховано',
     ].filter(Boolean).join(' · ');
     return choiceRow({
-      type: 'checkbox', name: `el-${entry.titleKey}`, checked, onChange: toggle,
+      type: 'checkbox', name: `el-${entry.titleKey}`, checked: shown, onChange: toggle,
       title: [entry.title, entry.likelyDvvs ? h('span', { class: 'badge badge-hint' }, 'ймовірно ДВВС') : null],
       detail,
       extra: teacherChips,
     });
   });
 
-  // Вибрані раніше дисципліни, яких уже немає в розкладі групи (інший семестр, інша група).
+  // Приховані раніше дисципліни, яких уже немає в розкладі групи (інший семестр, інша група).
   const known = new Set(electives.map((e) => e.titleKey));
-  const orphaned = prefs.electives.filter((e) => !e.external && !known.has(e.titleKey));
+  const orphaned = prefs.hiddenElectives.filter((e) => !known.has(e.titleKey));
   const orphanRows = orphaned.map((e) => h('li', { class: 'orphan' },
-    h('span', null, e.title, e.teacherName ? h('span', { class: 'muted' }, ` · ${e.teacherName}`) : null, h('span', { class: 'muted block small' }, 'немає в розкладі групи')),
-    h('button', { class: 'icon-btn', type: 'button', 'aria-label': `Прибрати ${e.title}`, onclick: () => { ctx.setPrefs({ electives: prefs.electives.filter((x) => !sameElective(x, e)) }); ctx.rerender(); } }, icon('close')),
+    h('span', null, e.title, e.teacherName ? h('span', { class: 'muted' }, ` · ${e.teacherName}`) : null, h('span', { class: 'muted block small' }, 'приховано, але немає в розкладі групи')),
+    h('button', { class: 'icon-btn', type: 'button', 'aria-label': `Прибрати ${e.title}`, onclick: () => { ctx.setPrefs({ hiddenElectives: prefs.hiddenElectives.filter((x) => !sameEntry(x, e)) }); ctx.rerender(); } }, icon('close')),
   ));
 
   return section('Вибіркові дисципліни',
     electives.length
-      ? 'Пари «Збірна група» за замовчуванням приховані. Позначте ті, які ви відвідуєте.'
+      ? 'Пари «Збірна група» показуються всі. Зніміть позначку з тих, які ви не відвідуєте, — їх буде приховано. Те саме робить кнопка «Не моя» на картці пари.'
       : 'У розкладі групи немає пар «Збірна група».',
     rows.length ? h('ul', { class: 'choice-list' }, rows) : null,
     orphanRows.length ? h('ul', { class: 'choice-list' }, orphanRows) : null,
@@ -267,12 +271,12 @@ function electivesSection(ctx, electives) {
 }
 
 function externalSection(ctx) {
-  const externals = ctx.prefs.electives.filter((e) => e.external);
+  const externals = ctx.prefs.externalElectives;
   return section('Сторонні дисципліни',
     'ДВВС, яких немає в розкладі вашої групи (наприклад, з іншого факультету). Пари підтягуються з розкладу викладача.',
     externals.length ? h('ul', { class: 'choice-list' }, externals.map((e) => h('li', { class: 'orphan' },
       h('span', null, h('strong', null, e.title), h('span', { class: 'muted block small' }, e.teacherName ?? '')),
-      h('button', { class: 'icon-btn', type: 'button', 'aria-label': `Прибрати ${e.title}`, onclick: () => { ctx.setPrefs({ electives: ctx.prefs.electives.filter((x) => !sameElective(x, e)) }); ctx.rerender(); } }, icon('close')),
+      h('button', { class: 'icon-btn', type: 'button', 'aria-label': `Прибрати ${e.title}`, onclick: () => { ctx.setPrefs({ externalElectives: ctx.prefs.externalElectives.filter((x) => !sameEntry(x, e)) }); ctx.rerender(); } }, icon('close')),
     ))) : null,
     h('a', { class: 'btn btn-small', href: href('settings', ['external']) }, icon('plus'), 'Додати з розкладу викладача'),
   );
@@ -342,8 +346,8 @@ export async function renderExternal(root, ctx) {
   }
   const disciplines = teacherDisciplines(lessons);
   const add = (d) => {
-    const entry = { titleKey: d.titleKey, title: d.title, teacherKey: teacher.key, teacherName: teacher.name, external: true };
-    if (!ctx.prefs.electives.some((e) => sameElective(e, entry))) ctx.setPrefs({ electives: [...ctx.prefs.electives, entry] });
+    const entry = { titleKey: d.titleKey, title: d.title, teacherKey: teacher.key, teacherName: teacher.name };
+    if (!ctx.prefs.externalElectives.some((e) => sameEntry(e, entry))) ctx.setPrefs({ externalElectives: [...ctx.prefs.externalElectives, entry] });
     ctx.toast(`Додано: ${d.title}`);
     ctx.go(href('settings'));
   };

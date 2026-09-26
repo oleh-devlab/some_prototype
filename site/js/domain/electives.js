@@ -1,4 +1,5 @@
 // Фільтрація «мого розкладу»: підгрупа, «Збірна група» (англійська, ДВВС), сторонні дисципліни.
+// «Збірна група» показується вся, доки користувач не приховає те, що не його.
 
 import { weekdayIndex } from '../lib/dates.js';
 import { isLanguage } from './parse.js';
@@ -15,14 +16,16 @@ export function makeClassifier(departmentOf = () => '') {
   };
 }
 
-export function matchesElective(lesson, electives) {
-  return electives.some((e) => e.titleKey === lesson.titleKey && (!e.teacherKey || e.teacherKey === lesson.teacher?.key));
+/** Чи потрапляє пара під запис списку (та сама дисципліна; викладач — будь-який або конкретний). */
+export function matchesElective(lesson, entries) {
+  return entries.some((e) => e.titleKey === lesson.titleKey && (!e.teacherKey || e.teacherKey === lesson.teacher?.key));
 }
 
 /**
  * Розкладає пари групи на видимі й приховані за вибором користувача.
- * У hidden потрапляють лише записи «Збірна група» (їх можна показати й позначити як свої);
- * пари іншої підгрупи просто відкидаються.
+ * «Збірна група» за замовчуванням показується вся; у hidden потрапляє те, що користувач
+ * позначив як «не моє», та інші викладачі іноземної, коли свого вибрано.
+ * Пари іншої підгрупи просто відкидаються.
  */
 export function filterForUser(lessons, prefs, classify) {
   const visible = [];
@@ -45,11 +48,12 @@ function decide(lesson, prefs, classify) {
   if (kind === 'mixed') {
     if (classify(lesson) === 'language') {
       const teacher = prefs.englishTeacher;
-      if (teacher && teacher.key === lesson.teacher?.key) return { show: true, why: 'language' };
-      return { show: false, why: teacher ? 'other-language-teacher' : 'language-not-set' };
+      if (!teacher) return { show: true, why: 'language-any' };
+      const mine = teacher.key === lesson.teacher?.key;
+      return { show: mine, why: mine ? 'language' : 'other-language-teacher' };
     }
-    if (matchesElective(lesson, prefs.electives)) return { show: true, why: 'elective' };
-    return { show: false, why: 'not-selected' };
+    if (matchesElective(lesson, prefs.hiddenElectives)) return { show: false, why: 'hidden-by-user' };
+    return { show: true, why: 'mixed' };
   }
   return { show: true, why: '' };
 }
