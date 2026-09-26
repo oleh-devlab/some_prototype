@@ -27,6 +27,7 @@ const $view = document.getElementById('view');
 const $title = document.getElementById('title');
 const $subtitle = document.getElementById('subtitle');
 const $toast = document.getElementById('toast');
+const $actions = document.getElementById('topbar-actions');
 
 let renderToken = 0;
 let lastHash = null;
@@ -61,6 +62,7 @@ function toast(message, action = null) {
 
 function makeContext(route, token) {
   const afterMount = [];
+  const mount = { actions: null };
   const ctx = {
     repo,
     route,
@@ -91,8 +93,10 @@ function makeContext(route, token) {
     redirect: (hash) => go(hash, { replace: true }),
     rerender: () => render(),
     afterMount: (fn) => afterMount.push(fn),
+    // Кнопки праворуч у верхній панелі (напр. «День/Тиждень»); з'являються разом із новим екраном.
+    setActions: (node) => { mount.actions = node; },
   };
-  return { ctx, afterMount };
+  return { ctx, afterMount, mount };
 }
 
 async function render() {
@@ -101,7 +105,7 @@ async function render() {
   const hash = location.hash;
   const fresh = h('div', { class: 'view-inner' });
   state.nav = { prev: null, next: null };
-  const { ctx, afterMount } = makeContext(route, token);
+  const { ctx, afterMount, mount } = makeContext(route, token);
 
   let name = route.name;
   if (!name) name = state.prefs.group ? 'my' : 'setup';
@@ -136,6 +140,7 @@ async function render() {
   if (token !== renderToken) return;
 
   $view.replaceChildren(fresh);
+  replaceChildren($actions, mount.actions);
   if (hash !== lastHash) window.scrollTo(0, 0);
   lastHash = hash;
   for (const a of document.querySelectorAll('.tabbar a')) {

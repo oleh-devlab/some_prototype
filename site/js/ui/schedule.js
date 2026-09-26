@@ -20,8 +20,8 @@ export function inDataRange(date, meta) {
   return !r || (date >= r.from && date <= r.to);
 }
 
-/** Панель: перемикач «день/тиждень», навігація датами, «сьогодні». */
-export function toolbar({ date, view, onChange, extra }) {
+/** Панель дат: ‹ дата › і «Сьогодні», коли показано не поточний день/тиждень. */
+export function toolbar({ date, view, onChange }) {
   const step = view === 'week' ? 7 : 1;
   const today = todayIso();
   const isCurrent = view === 'week' ? startOfWeek(today) === startOfWeek(date) : today === date;
@@ -29,27 +29,30 @@ export function toolbar({ date, view, onChange, extra }) {
   const label = view === 'week' ? `Тиждень ${formatWeekRange(date)}` : formatDayLong(date);
 
   return h('div', { class: 'toolbar' },
-    h('div', { class: 'toolbar-row' },
-      h('div', { class: 'segmented', role: 'group', 'aria-label': 'Вигляд' },
-        segButton('День', view === 'day', () => onChange({ view: 'day' })),
-        segButton('Тиждень', view === 'week', () => onChange({ view: 'week' })),
-      ),
-      extra ?? null,
-      isCurrent ? null : h('button', { class: 'btn btn-small', type: 'button', onclick: () => onChange({ date: today }) }, 'Сьогодні'),
-    ),
     h('div', { class: 'datenav' },
       h('button', { class: 'icon-btn', type: 'button', 'aria-label': view === 'week' ? 'Попередній тиждень' : 'Попередній день', onclick: () => onChange({ date: addDays(date, -step) }) }, icon('left')),
       h('div', { class: 'datenav-label', 'aria-live': 'polite' },
         h('strong', null, label),
-        rel ? h('span', { class: 'muted' }, rel) : null,
+        rel || !isCurrent
+          ? h('span', { class: 'datenav-sub' },
+            rel ? h('span', { class: 'muted' }, rel) : null,
+            isCurrent ? null : h('button', { class: 'today-btn', type: 'button', onclick: () => onChange({ date: today }) }, 'Сьогодні'))
+          : null,
       ),
       h('button', { class: 'icon-btn', type: 'button', 'aria-label': view === 'week' ? 'Наступний тиждень' : 'Наступний день', onclick: () => onChange({ date: addDays(date, step) }) }, icon('right')),
     ),
   );
 }
 
-function segButton(text, active, onclick) {
-  return h('button', { type: 'button', class: active ? 'is-active' : '', 'aria-pressed': String(active), onclick }, text);
+/** Перемикач «день ↔ тиждень» для верхньої панелі: підпис — вигляд, на який перемкне. */
+export function viewSwitch({ view, onChange }) {
+  const target = view === 'week' ? 'day' : 'week';
+  return h('button', {
+    class: 'view-switch',
+    type: 'button',
+    'aria-label': target === 'week' ? 'Показати тиждень' : 'Показати день',
+    onclick: () => onChange({ view: target }),
+  }, icon('calendar'), target === 'week' ? 'Тиждень' : 'День');
 }
 
 /** Свайп вліво/вправо по вмісту = наступний/попередній день чи тиждень. */
@@ -111,20 +114,15 @@ export function lessonCard(lesson, { mode = 'my', compact = false, timing = null
   if (foreign) badges.push(h('span', { class: 'badge badge-foreign' }, 'приховано'));
   if (lesson.replacement) badges.push(h('span', { class: 'badge badge-alert' }, 'Заміна'));
   if (lesson.online || lesson.link) badges.push(h('span', { class: 'badge badge-online' }, 'Онлайн'));
-  // Для чужих (прихованих) пар час «зараз/далі» не показуємо — лише шум.
-  if (state === 'now' && !compact && !foreign) {
-    badges.push(h('span', { class: 'badge badge-now' }, timing.left != null ? `зараз · ще ${formatDuration(timing.left)}` : 'зараз'));
-  } else if (next && timing?.startsIn != null && !compact && !foreign) {
-    badges.push(h('span', { class: 'badge badge-next' }, `далі · через ${formatDuration(timing.startsIn)}`));
-  }
-
   const metaItems = [];
   if (mode !== 'room' && lesson.room) {
     metaItems.push(h('a', { class: 'meta-link', href: href('rooms', [lesson.room.key], { date: lesson.date }) }, icon('pin'), lesson.room.label));
   }
   if (mode !== 'teacher') {
     for (const t of [lesson.teacher, ...(lesson.extraTeachers ?? [])].filter(Boolean)) {
-      metaItems.push(h('a', { class: 'meta-link', href: href('teachers', [t.key], { date: lesson.date }), title: [t.position, t.name].filter(Boolean).join(' ') }, icon('person'), compact ? t.short : t.name));
+      // На вузьких екранах у повній картці — «Прізвище І. П.» (CSS перемикає), щоб аудиторія й викладач уміщалися в рядок.
+      const name = compact ? t.short : [h('span', { class: 'name-full' }, t.name), h('span', { class: 'name-short' }, t.short)];
+      metaItems.push(h('a', { class: 'meta-link', href: href('teachers', [t.key], { date: lesson.date }), title: [t.position, t.name].filter(Boolean).join(' ') }, icon('person'), name));
     }
   }
   if (mode !== 'my' && lesson.groups?.length) {
@@ -161,12 +159,27 @@ export function lessonCard(lesson, { mode = 'my', compact = false, timing = null
       ? h('div', { class: 'lesson-meta' }, badges, metaItems)
       : metaItems.length ? h('div', { class: 'lesson-meta' }, metaItems) : null,
     extras,
-    state === 'now' && timing.progress != null && !compact && !foreign
-      ? h('div', { class: 'progress', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(Math.round(timing.progress * 100)) },
-        h('span', { style: `width:${Math.round(timing.progress * 100)}%` }))
-      : null,
-    actions,
+    compact ? null : lessonFoot(timing, { next, foreign, actions }),
   ));
+}
+
+/** Низ картки: «ще N хв» з прогресом для поточної пари, «через N хв» для наступної, дії праворуч. */
+function lessonFoot(timing, { next, foreign, actions }) {
+  let status = null;
+  // Для чужих (прихованих) пар час не показуємо — лише шум.
+  if (!foreign && timing?.state === 'now') {
+    const pct = timing.progress != null ? Math.round(timing.progress * 100) : null;
+    status = h('div', { class: 'lesson-status is-now' },
+      pct != null
+        ? h('div', { class: 'progress', role: 'progressbar', 'aria-label': 'Минуло від початку пари', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(pct) },
+          h('span', { style: `width:${pct}%` }))
+        : null,
+      h('span', null, timing.left != null ? `ще ${formatDuration(timing.left)}` : 'зараз'));
+  } else if (!foreign && next && timing?.startsIn != null) {
+    status = h('div', { class: 'lesson-status is-next' }, `Далі · через ${formatDuration(timing.startsIn)}`);
+  }
+  if (!status && !actions) return null;
+  return h('div', { class: 'lesson-foot' }, status, actions);
 }
 
 /**
@@ -270,18 +283,17 @@ export function notice(kind, ...content) {
 }
 
 /** Банер «дані неповні» для режимів аудиторії/викладача. */
-export function coverageNotice(meta, what) {
+/** Короткий банер «дані неповні»; tail — що саме це означає для поточного екрана. */
+export function coverageNotice(meta, tail) {
   const c = meta?.coverage;
   if (!c || c.complete) return null;
-  const names = c.loadedNames.slice(0, 5).join(', ') + (c.loadedNames.length > 5 ? '…' : '');
+  const names = c.loadedNames.slice(0, 3).join(', ') + (c.loadedNames.length > 3 ? '…' : '');
   // «1 групи», «1 з 4 груп»: відмінок визначає останнє число.
   const count = c.groupsTotal != null ? `${c.groupsLoaded} з ${c.groupsTotal}` : `${c.groupsLoaded}`;
   const word = plural(c.groupsTotal ?? c.groupsLoaded, ['групи', 'груп', 'груп']);
   return notice('warn',
-    h('strong', null, 'Дані неповні. '),
-    `У знімку є розклад ${count} ${word}`,
-    names ? ` (${names})` : '',
-    `. ${what} зібрано лише з цих розкладів, тож насправді пар може бути більше.`,
+    h('strong', null, 'Дані неповні: '),
+    `у знімку розклад лише ${count} ${word}${names ? ` (${names})` : ''}. ${tail}`,
   );
 }
 

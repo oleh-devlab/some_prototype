@@ -6,7 +6,7 @@ import { pushRecent } from '../prefs.js';
 import { append, h, icon, replaceChildren } from './dom.js';
 import { href } from './router.js';
 import {
-  attachSwipe, coverageNotice, dataFooter, dayBlock, notice, toolbar, weekBlock, weekRange,
+  attachSwipe, coverageNotice, dataFooter, dayBlock, notice, toolbar, viewSwitch, weekBlock, weekRange,
 } from './schedule.js';
 
 const LIST_LIMIT = 80;
@@ -14,7 +14,7 @@ const LIST_LIMIT = 80;
 const KINDS = {
   rooms: {
     title: 'Аудиторії',
-    placeholder: 'Номер аудиторії, напр. 129а або 8/Б',
+    placeholder: 'Аудиторія, напр. 129а або 8/Б',
     recentKey: 'recentRooms',
     list: (repo) => repo.listRooms(),
     get: (repo, key, range) => repo.getRoomSchedule(key, range),
@@ -25,14 +25,15 @@ const KINDS = {
     group: (room) => room.buildingName || (room.building ? `Корпус ${room.building}` : 'Без корпусу'),
     sort: (a, b) => a.label.localeCompare(b.label, 'uk', { numeric: true }),
     row: (room) => [h('strong', null, room.label), room.lab ? h('span', { class: 'muted' }, ' лабораторія') : null],
-    what: 'Пари в аудиторіях',
-    heading: (room) => `Аудиторія ${room.label}`,
-    subtitle: (room) => room.buildingName || (room.building ? `корпус ${room.building}` : ''),
+    what: 'Тут видно не всі пари.',
+    // Верхня панель: [назва, підпис]; head — окремий заголовок на сторінці, коли назва в панелі скорочена.
+    top: (room) => [`Аудиторія ${room.label}`, room.buildingName || (room.building ? `корпус ${room.building}` : '')],
+    head: () => null,
     mode: 'room',
   },
   teachers: {
     title: 'Викладачі',
-    placeholder: 'Прізвище або імʼя викладача',
+    placeholder: 'Прізвище викладача',
     recentKey: 'recentTeachers',
     list: (repo) => repo.listTeachers(),
     get: (repo, key, range) => repo.getTeacherSchedule(key, range),
@@ -42,9 +43,10 @@ const KINDS = {
     group: (t) => t.department || null,
     sort: (a, b) => a.name.localeCompare(b.name, 'uk'),
     row: (t) => [h('strong', null, t.name), t.position || t.department ? h('span', { class: 'muted block' }, [t.position, t.department].filter(Boolean).join(' · ')) : null],
-    what: 'Пари викладачів',
-    heading: (t) => t.name,
-    subtitle: (t) => [t.position, t.department].filter(Boolean).join(' · '),
+    what: 'Тут видно не всі пари.',
+    // Повне ПІБ у панель поруч із «Тиждень» не вміщається — там «Прізвище І. П.», а повне — на сторінці.
+    top: (t) => [t.short, t.position || 'викладач'],
+    head: (t) => ({ title: t.name, sub: [t.position, t.department].filter(Boolean).join(' · ') }),
     mode: 'teacher',
   },
 };
@@ -153,7 +155,8 @@ async function renderObject(root, ctx, kindName, kind, key) {
     append(root, back, notice('warn', 'Не знайдено в поточних даних.'), dataFooter(ctx.meta));
     return;
   }
-  ctx.setTitle(kind.heading(obj), kind.subtitle(obj));
+  ctx.setTitle(...kind.top(obj));
+  const head = kind.head(obj);
   ctx.setUi({ [kind.recentKey]: pushRecent(ctx.ui[kind.recentKey], { key, label: kind.label(obj) }) });
 
   const navigate = (patch) => {
@@ -162,6 +165,7 @@ async function renderObject(root, ctx, kindName, kind, key) {
   };
   const step = view === 'week' ? 7 : 1;
   ctx.setNav({ prev: () => navigate({ date: addDays(date, -step) }), next: () => navigate({ date: addDays(date, step) }) });
+  ctx.setActions(viewSwitch({ view, onChange: navigate }));
 
   const opts = { mode: kind.mode, meta: ctx.meta };
   const body = view === 'week'
@@ -171,7 +175,13 @@ async function renderObject(root, ctx, kindName, kind, key) {
   attachSwipe(content, ctx.nav);
 
   append(root,
-    back,
+    head
+      ? h('div', { class: 'object-head' },
+        h('a', { class: 'icon-btn', href: href(kindName), 'aria-label': `До списку: ${kind.title}` }, icon('left')),
+        h('div', { class: 'object-head-text' },
+          h('h2', null, head.title),
+          head.sub ? h('p', { class: 'muted small' }, head.sub) : null))
+      : back,
     toolbar({ date, view, onChange: navigate }),
     h('div', { class: 'notices' }, coverageNotice(ctx.meta, kind.what)),
     content,

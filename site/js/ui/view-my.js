@@ -6,7 +6,7 @@ import { addExternal, buildCatalog, filterForUser, listSubgroups, matchesElectiv
 import { append, h, icon } from './dom.js';
 import { href } from './router.js';
 import {
-  attachSwipe, dataFooter, dayBlock, inDataRange, lessonTiming, notice, toolbar, weekBlock, weekRange,
+  attachSwipe, dataFooter, dayBlock, inDataRange, lessonTiming, notice, toolbar, viewSwitch, weekBlock, weekRange,
 } from './schedule.js';
 
 /** Пари групи за діапазоном з урахуванням вибору користувача. */
@@ -96,6 +96,7 @@ export async function renderMy(root, ctx) {
   };
   const step = view === 'week' ? 7 : 1;
   ctx.setNav({ prev: () => navigate({ date: addDays(date, -step) }), next: () => navigate({ date: addDays(date, step) }) });
+  ctx.setActions(viewSwitch({ view, onChange: navigate }));
 
   // Сповіщення над розкладом.
   const notes = [];
@@ -110,7 +111,7 @@ export async function renderMy(root, ctx) {
     notes.push(notice('info', 'Підгрупу не вибрано — показано пари всіх підгруп. ', h('a', { href: href('settings') }, 'Вибрати підгрупу')));
   }
   if (visible.some((l) => l.why === 'language-any')) {
-    notes.push(notice('info', 'Іноземну показано для всіх викладачів. Натисніть «Мій викладач» на своїй парі — інші зникнуть.'));
+    notes.push(notice('info', 'Іноземна: показано всіх викладачів. Позначте свого кнопкою «Мій викладач».'));
   }
   for (const e of missingExternal) {
     notes.push(notice('warn', `Сторонню дисципліну «${e.title}» не показано: розкладу викладача ${e.teacherName ?? ''} немає в даних.`));

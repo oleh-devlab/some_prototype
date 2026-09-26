@@ -293,7 +293,7 @@ function dataSection(ctx) {
   ].filter(Boolean);
   return section('Дані', null,
     h('dl', { class: 'facts' }, rows.map(([k, v]) => [h('dt', null, k), h('dd', null, v)])),
-    coverageNotice(m, 'Режими «Аудиторія» і «Викладач»'),
+    coverageNotice(m, 'Аудиторії й викладачі показують не всі пари.'),
     m.errors?.length ? notice('warn', m.errors.join(' ')) : null,
     storageAvailable() ? null : notice('warn', 'Браузер не дозволяє зберігати дані сайту — вибір не збережеться після закриття сторінки.'),
     h('button', {
@@ -331,7 +331,7 @@ export async function renderExternal(root, ctx) {
     append(root, back,
       h('p', { class: 'muted' }, 'Знайдіть викладача, який веде вашу дисципліну, і виберіть її з його розкладу.'),
       h('div', { class: 'search' }, icon('search'), input),
-      coverageNotice(ctx.meta, 'Розклади викладачів'),
+      coverageNotice(ctx.meta, 'Розклад викладача може бути неповним.'),
       results);
     if (matchMedia('(hover: hover)').matches) ctx.afterMount(() => input.focus());
     return;
