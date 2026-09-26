@@ -1,0 +1,196 @@
+// Режим «Мій розклад»: група + підгрупа + мої вибіркові.
+
+import { addDays, formatDayLong, isIsoDate, toUaDate, todayIso } from '../lib/dates.js';
+import { plural } from '../lib/text.js';
+import { addExternal, buildCatalog, filterForUser, listSubgroups } from '../domain/electives.js';
+import { sameElective } from '../prefs.js';
+import { append, h, icon } from './dom.js';
+import { href } from './router.js';
+import {
+  attachSwipe, dataFooter, dayBlock, inDataRange, lessonTiming, notice, toolbar, weekBlock, weekRange,
+} from './schedule.js';
+
+/** Пари групи за діапазоном з урахуванням вибору користувача. */
+async function loadMine(ctx, groupId, range) {
+  const { repo, prefs, classify } = ctx;
+  const { lessons } = await repo.getGroupSchedule(groupId, range);
+  const { visible, hidden } = filterForUser(lessons, prefs, classify);
+
+  const externals = prefs.electives.filter((e) => e.external && e.teacherKey);
+  const missingExternal = [];
+  const externalLessons = [];
+  await Promise.all(externals.map(async (e) => {
+    const res = await repo.getTeacherSchedule(e.teacherKey, range).catch(() => null);
+    if (!res?.teacher) missingExternal.push(e);
+    for (const l of res?.lessons ?? []) if (l.titleKey === e.titleKey) externalLessons.push(l);
+  }));
+  return { visible: addExternal(visible, externalLessons), hidden, missingExternal };
+}
+
+/** Каталог «Збірна група» за весь знімок: потрібен, щоб знати, скільки викладачів у дисципліни. */
+async function loadCatalog(ctx, groupId) {
+  const range = ctx.meta.range ?? undefined;
+  const { lessons } = await ctx.repo.getGroupSchedule(groupId, range);
+  return { catalog: buildCatalog(lessons, ctx.classify), subgroups: listSubgroups(lessons) };
+}
+
+/**
+ * Якщо дата не задана в адресі: сьогодні, якщо ще є пари; інакше найближчий день з парами.
+ */
+async function pickDate(ctx, groupId) {
+  const today = todayIso();
+  const { visible } = await loadMine(ctx, groupId, { from: today, to: addDays(today, 13) });
+  const todays = visible.filter((l) => l.date === today);
+  if (todays.some((l) => lessonTiming(l).state !== 'past')) return { date: today };
+  const next = visible.find((l) => l.date > today);
+  if (next) {
+    return {
+      date: next.date,
+      note: todays.length ? 'Сьогодні пари вже закінчилися — показано наступний день з парами.' : 'Сьогодні пар немає — показано найближчий день з парами.',
+    };
+  }
+  const r = ctx.meta.range;
+  if (r && (today < r.from || today > r.to)) {
+    const { visible: all } = await loadMine(ctx, groupId, r);
+    if (all.length) return { date: all[0].date, note: `На сьогодні даних немає: знімок охоплює ${toUaDate(r.from)} – ${toUaDate(r.to)}.` };
+  }
+  return { date: today };
+}
+
+export async function renderMy(root, ctx) {
+  const { repo, prefs, route } = ctx;
+  if (!prefs.group) {
+    ctx.redirect(href('setup'));
+    return;
+  }
+  const group = await repo.findGroup(prefs.group);
+  ctx.setTitle(prefs.group.name || 'Мій розклад', subgroupLabel(prefs.subgroup), href('settings'));
+  if (!group) {
+    append(root,
+      notice('warn', `Групи «${prefs.group.name}» немає в поточних даних.`),
+      h('p', null, h('a', { class: 'btn', href: href('settings', ['group']) }, 'Вибрати іншу групу')),
+      dataFooter(ctx.meta),
+    );
+    return;
+  }
+
+  const view = route.query.view === 'week' || route.query.view === 'day' ? route.query.view : ctx.ui.view;
+  let date = isIsoDate(route.query.date) ? route.query.date : null;
+  let autoNote = null;
+  if (!date) {
+    const picked = view === 'day' ? await pickDate(ctx, group.id) : { date: todayIso() };
+    date = picked.date;
+    autoNote = picked.note ?? null;
+  }
+  if (!ctx.isCurrent()) return;
+
+  const range = view === 'week' ? weekRange(date) : { from: date, to: date };
+  const [{ visible, hidden, missingExternal }, { catalog, subgroups }] = await Promise.all([
+    loadMine(ctx, group.id, range),
+    loadCatalog(ctx, group.id),
+  ]);
+  if (!ctx.isCurrent()) return;
+
+  const navigate = (patch) => {
+    if (patch.view) ctx.setUi({ view: patch.view });
+    ctx.go(href('my', [], { date, view, ...patch }));
+  };
+  const step = view === 'week' ? 7 : 1;
+  ctx.setNav({ prev: () => navigate({ date: addDays(date, -step) }), next: () => navigate({ date: addDays(date, step) }) });
+
+  // Сповіщення над розкладом.
+  const notes = [];
+  if (ctx.meta.offline) notes.push(notice('warn', 'Немає зʼєднання — показано збережену копію даних.'));
+  if (group.status !== 'ok' && group.status !== 'empty') {
+    notes.push(notice('warn', h('strong', null, group.statusMessage), group.statusCode ? ` (код ${group.statusCode})` : ''));
+  }
+  if (autoNote) {
+    notes.push(notice('info', autoNote, ' ', h('button', { class: 'link-btn', type: 'button', onclick: () => navigate({ date: todayIso() }) }, 'Показати сьогодні')));
+  }
+  if (prefs.subgroup == null && subgroups.length > 1) {
+    notes.push(notice('info', 'Підгрупу не вибрано — показано пари всіх підгруп. ', h('a', { href: href('settings') }, 'Вибрати підгрупу')));
+  }
+  if (catalog.languages.length && !prefs.englishTeacher) {
+    notes.push(notice('info', 'Іноземна мова прихована, доки ви не виберете свого викладача. ', h('a', { href: href('settings') }, 'Вибрати викладача')));
+  }
+  for (const e of missingExternal) {
+    notes.push(notice('warn', `Сторонню дисципліну «${e.title}» не показано: розкладу викладача ${e.teacherName ?? ''} немає в даних.`));
+  }
+
+  const showHidden = ctx.session.showHidden;
+  if (hidden.length) {
+    const where = view === 'week' ? 'цього тижня' : 'цього дня';
+    notes.push(h('div', { class: 'hidden-bar' },
+      h('span', null, `${showHidden ? 'Показано' : 'Приховано'} ${hidden.length} ${plural(hidden.length, ['пару', 'пари', 'пар'])} «Збірна група» ${where}, яких немає у вашому виборі.`),
+      h('button', { class: 'btn btn-small', type: 'button', onclick: () => { ctx.session.showHidden = !showHidden; ctx.rerender(); } }, showHidden ? 'Сховати' : 'Показати'),
+    ));
+  }
+
+  const hiddenIds = new Set(showHidden ? hidden.map((l) => l.id) : []);
+  const shown = showHidden ? [...visible, ...hidden] : visible;
+  const actionsFor = (lesson) => (hiddenIds.has(lesson.id) ? mineButton(ctx, lesson, catalog) : null);
+
+  const body = view === 'week'
+    ? weekBlock(date, shown, { mode: 'my', meta: ctx.meta, hiddenIds, dayHref: (d) => href('my', [], { date: d, view: 'day' }) })
+    : dayBlock(date, shown, { mode: 'my', meta: ctx.meta, gaps: true, hiddenIds, actionsFor });
+
+  const content = h('div', { class: 'schedule' }, body);
+  attachSwipe(content, ctx.nav);
+
+  append(root,
+    toolbar({ date, view, onChange: navigate }),
+    notes.length ? h('div', { class: 'notices' }, notes) : null,
+    content,
+    view === 'day' ? nextDayHint(ctx, group.id, date, visible) : null,
+    dataFooter(ctx.meta),
+  );
+}
+
+function subgroupLabel(subgroup) {
+  return subgroup ? `підгрупа ${subgroup}` : 'усі підгрупи';
+}
+
+/** Під порожнім днем — кнопка переходу до наступного дня з парами. */
+function nextDayHint(ctx, groupId, date, visible) {
+  if (visible.some((l) => l.date === date) || !inDataRange(date, ctx.meta)) return null;
+  const holder = h('div', { class: 'next-hint' });
+  loadMine(ctx, groupId, { from: addDays(date, 1), to: addDays(date, 30) }).then(({ visible: ahead }) => {
+    const next = ahead[0];
+    if (!next || !ctx.isCurrent()) return;
+    holder.append(h('a', { class: 'btn', href: href('my', [], { date: next.date, view: 'day' }) },
+      `Наступні пари: ${formatDayLong(next.date)}`, icon('right')));
+  });
+  return holder;
+}
+
+/** Кнопка «Це моя пара» для прихованого запису «Збірна група». */
+function mineButton(ctx, lesson, catalog) {
+  return h('div', { class: 'lesson-actions' },
+    h('button', {
+      class: 'btn btn-small btn-primary',
+      type: 'button',
+      onclick: () => {
+        if (ctx.classify(lesson) === 'language') {
+          if (!lesson.teacher) return;
+          ctx.setPrefs({ englishTeacher: { key: lesson.teacher.key, name: lesson.teacher.name } });
+          ctx.toast(`Викладач іноземної: ${lesson.teacher.short}`);
+        } else {
+          const entry = catalog.electives.find((e) => e.titleKey === lesson.titleKey);
+          const byTeacher = entry && entry.teachers.length > 1 && lesson.teacher;
+          const elective = {
+            titleKey: lesson.titleKey,
+            title: lesson.title,
+            teacherKey: byTeacher ? lesson.teacher.key : null,
+            teacherName: byTeacher ? lesson.teacher.name : null,
+            external: false,
+          };
+          if (!ctx.prefs.electives.some((e) => sameElective(e, elective))) {
+            ctx.setPrefs({ electives: [...ctx.prefs.electives, elective] });
+          }
+          ctx.toast(byTeacher ? `Додано: ${lesson.title} (${lesson.teacher.short})` : `Додано: ${lesson.title}`);
+        }
+        ctx.rerender();
+      },
+    }, icon('check'), 'Це моя пара'),
+  );
+}
