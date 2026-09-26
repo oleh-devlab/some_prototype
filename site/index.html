@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Зручний розклад занять ЛНУ імені Івана Франка: моя група й підгрупа, аудиторії, викладачі.">
+  <meta name="theme-color" content="#1d4ed8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
+  <title>Розклад ЛНУ</title>
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/app.css">
+  <script type="module" src="js/main.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="topbar-text">
+        <h1 id="title">Розклад ЛНУ</h1>
+        <p id="subtitle" hidden></p>
+      </div>
+    </div>
+  </header>
+
+  <main id="view" class="view" tabindex="-1">
+    <div class="view-inner">
+      <p class="loading">Завантаження розкладу…</p>
+      <noscript><p>Для роботи сайту потрібен JavaScript.</p></noscript>
+    </div>
+  </main>
+
+  <nav class="tabbar" aria-label="Режими">
+    <a href="#/my" data-tab="my">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3v3M17 3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/></svg>
+      <span>Мій розклад</span>
+    </a>
+    <a href="#/rooms" data-tab="rooms">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 21h14M7 21V4a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v17M14 12h.01"/></svg>
+      <span>Аудиторії</span>
+    </a>
+    <a href="#/teachers" data-tab="teachers">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>
+      <span>Викладачі</span>
+    </a>
+    <a href="#/settings" data-tab="settings">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>
+      <span>Налаштування</span>
+    </a>
+  </nav>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

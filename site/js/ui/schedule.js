@@ -1,0 +1,301 @@
+// Спільний рендер розкладу для трьох режимів: «мій», «аудиторія», «викладач».
+
+import {
+  addDays, formatDateShort, formatDayLong, formatDuration, formatWeekRange, minutesNow,
+  relativeDayLabel, startOfWeek, toMinutes, todayIso, weekDays, weekdayIndex, weekdayShort,
+} from '../lib/dates.js';
+import { plural } from '../lib/text.js';
+import { groupByDate, groupBySlot } from '../domain/lessons.js';
+import { h, icon } from './dom.js';
+import { href } from './router.js';
+
+/** Діапазон, який треба завантажити для поточного вигляду (завжди тиждень — його вистачає і для дня). */
+export function weekRange(date) {
+  const from = startOfWeek(date);
+  return { from, to: addDays(from, 6) };
+}
+
+export function inDataRange(date, meta) {
+  const r = meta?.range;
+  return !r || (date >= r.from && date <= r.to);
+}
+
+/** Панель: перемикач «день/тиждень», навігація датами, «сьогодні». */
+export function toolbar({ date, view, onChange, extra }) {
+  const step = view === 'week' ? 7 : 1;
+  const today = todayIso();
+  const isCurrent = view === 'week' ? startOfWeek(today) === startOfWeek(date) : today === date;
+  const rel = view === 'day' ? relativeDayLabel(date) : isCurrent ? 'цей тиждень' : null;
+  const label = view === 'week' ? `Тиждень ${formatWeekRange(date)}` : formatDayLong(date);
+
+  return h('div', { class: 'toolbar' },
+    h('div', { class: 'toolbar-row' },
+      h('div', { class: 'segmented', role: 'group', 'aria-label': 'Вигляд' },
+        segButton('День', view === 'day', () => onChange({ view: 'day' })),
+        segButton('Тиждень', view === 'week', () => onChange({ view: 'week' })),
+      ),
+      extra ?? null,
+      isCurrent ? null : h('button', { class: 'btn btn-small', type: 'button', onclick: () => onChange({ date: today }) }, 'Сьогодні'),
+    ),
+    h('div', { class: 'datenav' },
+      h('button', { class: 'icon-btn', type: 'button', 'aria-label': view === 'week' ? 'Попередній тиждень' : 'Попередній день', onclick: () => onChange({ date: addDays(date, -step) }) }, icon('left')),
+      h('div', { class: 'datenav-label', 'aria-live': 'polite' },
+        h('strong', null, label),
+        rel ? h('span', { class: 'muted' }, rel) : null,
+      ),
+      h('button', { class: 'icon-btn', type: 'button', 'aria-label': view === 'week' ? 'Наступний тиждень' : 'Наступний день', onclick: () => onChange({ date: addDays(date, step) }) }, icon('right')),
+    ),
+  );
+}
+
+function segButton(text, active, onclick) {
+  return h('button', { type: 'button', class: active ? 'is-active' : '', 'aria-pressed': String(active), onclick }, text);
+}
+
+/** Свайп вліво/вправо по вмісту = наступний/попередній день чи тиждень. */
+export function attachSwipe(el, { prev, next }) {
+  let x0 = null;
+  let y0 = null;
+  el.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) return;
+    x0 = e.touches[0].clientX;
+    y0 = e.touches[0].clientY;
+  }, { passive: true });
+  el.addEventListener('touchend', (e) => {
+    if (x0 == null) return;
+    const dx = e.changedTouches[0].clientX - x0;
+    const dy = e.changedTouches[0].clientY - y0;
+    x0 = null;
+    if (Math.abs(dx) > 70 && Math.abs(dy) < 50) (dx < 0 ? next : prev)?.();
+  }, { passive: true });
+}
+
+/** Статус пари відносно «зараз»: past | now | future (+ прогрес для поточної). */
+export function lessonTiming(lesson) {
+  const today = todayIso();
+  if (lesson.date !== today) return { state: lesson.date < today ? 'past' : 'future' };
+  const nowMin = minutesNow();
+  const s = toMinutes(lesson.start);
+  const e = toMinutes(lesson.end);
+  if (e != null && nowMin >= e) return { state: 'past' };
+  if (s != null && nowMin >= s) {
+    return { state: 'now', left: e != null ? e - nowMin : null, progress: s != null && e ? (nowMin - s) / (e - s) : null };
+  }
+  return { state: 'future', startsIn: s != null ? s - nowMin : null };
+}
+
+const AUDIENCE_TAG = {
+  language: 'Ваш викладач',
+  elective: 'Моя вибіркова',
+  external: 'Стороння вибіркова',
+};
+
+/**
+ * Картка пари.
+ * mode: 'my' — показуємо аудиторію й викладача; 'room' — викладача й групи; 'teacher' — аудиторію й групи.
+ */
+export function lessonCard(lesson, { mode = 'my', compact = false, timing = null, next = false, foreign = false, actions = null } = {}) {
+  const tone = lesson.kind === 'lesson' ? lesson.type.tone : 'reserved';
+  const title = lesson.kind === 'lesson' ? lesson.title : lesson.reservation || 'Слот без назви';
+  const state = timing?.state;
+
+  const badges = [];
+  if (lesson.kind === 'lesson' && lesson.type.short) {
+    badges.push(h('span', { class: 'badge badge-type', title: lesson.type.label }, compact ? lesson.type.short : lesson.type.label));
+  }
+  if (lesson.kind === 'reserved') badges.push(h('span', { class: 'badge badge-type' }, 'Зайнято'));
+  if (lesson.kind === 'untitled') badges.push(h('span', { class: 'badge' }, 'можливо, ДВВС'));
+  if (mode === 'my') {
+    const tag = AUDIENCE_TAG[lesson.why] ?? (lesson.audience.kind === 'whole' ? null : lesson.audience.label);
+    if (tag) badges.push(h('span', { class: `badge badge-aud aud-${lesson.why || lesson.audience.kind}` }, tag));
+  }
+  if (foreign) badges.push(h('span', { class: 'badge badge-foreign' }, 'не у вашому виборі'));
+  if (lesson.replacement) badges.push(h('span', { class: 'badge badge-alert' }, 'Заміна'));
+  if (lesson.online || lesson.link) badges.push(h('span', { class: 'badge badge-online' }, 'Онлайн'));
+  // Для чужих (прихованих) пар час «зараз/далі» не показуємо — лише шум.
+  if (state === 'now' && !compact && !foreign) {
+    badges.push(h('span', { class: 'badge badge-now' }, timing.left != null ? `зараз · ще ${formatDuration(timing.left)}` : 'зараз'));
+  } else if (next && timing?.startsIn != null && !compact && !foreign) {
+    badges.push(h('span', { class: 'badge badge-next' }, `далі · через ${formatDuration(timing.startsIn)}`));
+  }
+
+  const metaItems = [];
+  if (mode !== 'room' && lesson.room) {
+    metaItems.push(h('a', { class: 'meta-link', href: href('rooms', [lesson.room.key], { date: lesson.date }) }, icon('pin'), lesson.room.label));
+  }
+  if (mode !== 'teacher') {
+    for (const t of [lesson.teacher, ...(lesson.extraTeachers ?? [])].filter(Boolean)) {
+      metaItems.push(h('a', { class: 'meta-link', href: href('teachers', [t.key], { date: lesson.date }), title: [t.position, t.name].filter(Boolean).join(' ') }, icon('person'), compact ? t.short : t.name));
+    }
+  }
+  if (mode !== 'my' && lesson.groups?.length) {
+    const audiences = [...new Set((lesson.audiences ?? [lesson.audience]).map((a) => a.label).filter(Boolean))];
+    metaItems.push(h('span', { class: 'meta-text' }, lesson.groups.join(', '), audiences.length ? h('span', { class: 'muted' }, ` · ${audiences.join(', ')}`) : null));
+  } else if (mode !== 'my' && lesson.audience?.label) {
+    metaItems.push(h('span', { class: 'meta-text' }, lesson.audience.label));
+  }
+
+  const extras = [];
+  if (!compact) {
+    if (lesson.replacement) extras.push(h('p', { class: 'note note-alert' }, h('strong', null, 'Заміна: '), lesson.replacement));
+    if (lesson.link) {
+      extras.push(h('a', { class: 'btn btn-small btn-online', href: lesson.link, target: '_blank', rel: 'noopener noreferrer' }, icon('link'), lesson.linkText || 'Посилання на онлайн-заняття'));
+    } else if (lesson.linkText) {
+      extras.push(h('p', { class: 'note' }, lesson.linkText));
+    }
+    if (lesson.online) extras.push(h('p', { class: 'note' }, h('strong', null, 'Онлайн: '), lesson.online));
+    if (lesson.comment) extras.push(h('p', { class: 'note' }, lesson.comment));
+    if (lesson.half) extras.push(h('p', { class: 'note' }, h('strong', null, 'Частина: '), lesson.half));
+    if (lesson.kind === 'untitled') extras.push(h('p', { class: 'note' }, 'Зайнятий слот без назви. На деяких факультетах так позначають місце під ДВВС.'));
+  }
+
+  return h('article', {
+    class: ['lesson', `tone-${tone}`, compact && 'is-compact', state && `is-${state}`, next && 'is-next', foreign && 'is-foreign', lesson.replacement && 'has-replacement'],
+    dataset: { id: lesson.id },
+  },
+  compact ? h('span', { class: 'lesson-time' }, h('b', null, lesson.number), ' ', lesson.start) : null,
+  h('div', { class: 'lesson-main' },
+    // Компактна картка (тиждень): назва першою, мітки — в одному рядку з аудиторією/викладачем.
+    compact ? null : badges.length ? h('div', { class: 'badges' }, badges) : null,
+    h('h3', { class: 'lesson-title' }, title),
+    compact
+      ? h('div', { class: 'lesson-meta' }, badges, metaItems)
+      : metaItems.length ? h('div', { class: 'lesson-meta' }, metaItems) : null,
+    extras,
+    state === 'now' && timing.progress != null && !compact && !foreign
+      ? h('div', { class: 'progress', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(Math.round(timing.progress * 100)) },
+        h('span', { style: `width:${Math.round(timing.progress * 100)}%` }))
+      : null,
+    actions,
+  ));
+}
+
+/**
+ * Один день: пари по слотах, «вікна» між ними, порожні слоти для аудиторії.
+ * opts.freeSlots — показувати незайняті номери пар (режим «аудиторія»); opts.bells — «дзвінки» з даних.
+ */
+export function dayBlock(date, lessons, opts) {
+  const { mode, meta, freeSlots = false, gaps = false, hiddenIds = new Set(), actionsFor } = opts;
+  if (!inDataRange(date, meta)) return noData(date, meta);
+
+  let slots = groupBySlot(lessons);
+  if (freeSlots && meta?.bells?.length) {
+    const byNumber = new Map(slots.map((s) => [s.number, s]));
+    const maxUsed = Math.max(0, ...slots.map((s) => s.number));
+    const bells = meta.bells.filter((b) => b.number <= Math.max(maxUsed, 6));
+    slots = [...bells.map((b) => byNumber.get(b.number) ?? { ...b, lessons: [] }),
+      ...slots.filter((s) => !bells.some((b) => b.number === s.number))].sort((a, b) => a.number - b.number);
+  }
+  if (!slots.length) return h('div', { class: 'empty' }, h('p', null, 'Пар немає'));
+
+  const nextId = findNext(lessons.filter((l) => !hiddenIds.has(l.id)));
+  const complete = meta?.coverage?.complete;
+  const out = [];
+  let prevEnd = null;
+  for (const slot of slots) {
+    const startMin = toMinutes(slot.start);
+    if (gaps && prevEnd != null && startMin != null && slot.lessons.length && startMin - prevEnd > 30) {
+      out.push(h('div', { class: 'gap' }, `Вікно · ${formatDuration(startMin - prevEnd)}`));
+    }
+    if (slot.lessons.length) prevEnd = toMinutes(slot.end) ?? prevEnd;
+    const timing = slot.lessons.length ? lessonTiming(slot.lessons[0]) : null;
+    out.push(h('section', { class: ['slot', timing?.state && `is-${timing.state}`, !slot.lessons.length && 'is-free'] },
+      h('div', { class: 'slot-time' },
+        h('span', { class: 'slot-num' }, slot.number || '–'),
+        h('span', null, slot.start),
+        h('span', { class: 'muted' }, slot.end),
+      ),
+      h('div', { class: 'slot-body' },
+        slot.lessons.length
+          ? slot.lessons.map((l) => lessonCard(l, {
+            mode,
+            timing: lessonTiming(l),
+            next: l.id === nextId,
+            foreign: hiddenIds.has(l.id),
+            actions: actionsFor?.(l) ?? null,
+          }))
+          : h('div', { class: 'free' }, complete ? 'Вільно' : 'Пар у наявних даних немає'),
+      ),
+    ));
+  }
+  return h('div', { class: 'day' }, out);
+}
+
+function findNext(lessons) {
+  const upcoming = lessons
+    .map((l) => ({ l, t: lessonTiming(l) }))
+    .filter(({ t }) => t.state === 'future' && t.startsIn != null)
+    .sort((a, b) => a.t.startsIn - b.t.startsIn);
+  // «далі» показуємо лише для сьогоднішніх пар; lessonTiming для інших днів не рахує startsIn.
+  return upcoming[0]?.l.id ?? null;
+}
+
+function noData(date, meta) {
+  const r = meta?.range;
+  return h('div', { class: 'empty' },
+    h('p', null, 'На цю дату даних немає.'),
+    r ? h('p', { class: 'muted' }, `Розклад у знімку: ${formatDateShort(r.from)} – ${formatDateShort(r.to)}.`) : null,
+  );
+}
+
+/** Тиждень: дні з компактними картками. Сб/Нд показуються, лише якщо в них є пари. */
+export function weekBlock(date, lessons, opts) {
+  const { mode, meta, hiddenIds = new Set(), dayHref } = opts;
+  const byDate = groupByDate(lessons);
+  const today = todayIso();
+  const days = weekDays(date).filter((d) => weekdayIndex(d) < 5 || byDate.has(d) || d === today);
+  return h('div', { class: 'week' }, days.map((d) => {
+    const list = byDate.get(d) ?? [];
+    const rel = relativeDayLabel(d);
+    let body;
+    if (!inDataRange(d, meta)) body = h('p', { class: 'muted small' }, 'Немає даних');
+    else if (!list.length) body = h('p', { class: 'muted small' }, 'Пар немає');
+    else body = list.map((l) => lessonCard(l, { mode, compact: true, timing: lessonTiming(l), foreign: hiddenIds.has(l.id) }));
+    return h('section', { class: ['week-day', d === today && 'is-today'] },
+      h('a', { class: 'week-day-head', href: dayHref(d) },
+        h('span', { class: 'week-day-name' }, weekdayShort(d)),
+        h('span', null, formatDayLong(d).split(', ')[1]),
+        rel ? h('span', { class: 'muted' }, rel) : null,
+        list.length ? h('span', { class: 'count' }, `${list.length} ${plural(list.length, ['пара', 'пари', 'пар'])}`) : null,
+      ),
+      h('div', { class: 'week-day-body' }, body),
+    );
+  }));
+}
+
+export function notice(kind, ...content) {
+  return h('div', { class: `notice notice-${kind}`, role: kind === 'warn' ? 'status' : null },
+    icon(kind === 'warn' ? 'warn' : 'info'),
+    h('div', null, content),
+  );
+}
+
+/** Банер «дані неповні» для режимів аудиторії/викладача. */
+export function coverageNotice(meta, what) {
+  const c = meta?.coverage;
+  if (!c || c.complete) return null;
+  const names = c.loadedNames.slice(0, 5).join(', ') + (c.loadedNames.length > 5 ? '…' : '');
+  // «1 групи», «1 з 4 груп»: відмінок визначає останнє число.
+  const count = c.groupsTotal != null ? `${c.groupsLoaded} з ${c.groupsTotal}` : `${c.groupsLoaded}`;
+  const word = plural(c.groupsTotal ?? c.groupsLoaded, ['групи', 'груп', 'груп']);
+  return notice('warn',
+    h('strong', null, 'Дані неповні. '),
+    `У знімку є розклад ${count} ${word}`,
+    names ? ` (${names})` : '',
+    `. ${what} зібрано лише з цих розкладів, тож насправді пар може бути більше.`,
+  );
+}
+
+export function dataFooter(meta) {
+  if (!meta) return null;
+  const parts = [];
+  if (meta.generatedAt) {
+    const d = new Date(meta.generatedAt);
+    if (!Number.isNaN(d.getTime())) {
+      parts.push(`Дані оновлено ${d.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' })} о ${d.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })}`);
+    }
+  }
+  if (meta.range) parts.push(`знімок ${formatDateShort(meta.range.from)} – ${formatDateShort(meta.range.to)}`);
+  if (meta.coverage && !meta.coverage.complete) parts.push('дані неповні');
+  return parts.length ? h('p', { class: 'data-footer' }, parts.join(' · ')) : null;
+}
