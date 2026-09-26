@@ -27,6 +27,13 @@
       <noscript><p>Для роботи сайту потрібен JavaScript.</p></noscript>
     </div>
   </main>
+  <script>
+    // З диска (file://) браузер не завантажує ES-модулі, тож main.js не стартує. Підказуємо, що робити.
+    if (location.protocol === 'file:') {
+      document.querySelector('.loading').textContent =
+        'Сайт треба відкривати через вебсервер, а не файлом з диска. Локально: cd site && python3 -m http.server 8000, далі http://localhost:8000/';
+    }
+  </script>
 
   <nav class="tabbar" aria-label="Режими">
     <a href="#/my" data-tab="my">
